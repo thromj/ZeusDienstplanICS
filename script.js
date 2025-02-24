@@ -16,8 +16,14 @@ async function parsePDF() {
                         text += item.str + " ";
                     });
                 }
+
                 // Innerhalb der `parsePDF`-Funktion, direkt nach der Schleife, die den Text extrahiert:
                 console.log("Extrahierter Text:", text); // Zeigt den gesamten extrahierten Text an
+                // Nach dem Einlesen der Datei:
+                console.log("Datei erfolgreich eingelesen.");
+
+                // Nach dem Extrahieren des Textes:
+                console.log("Text erfolgreich extrahiert:", text.length, "Zeichen");
 
                 // Dienstplanbereich eingrenzen (robuster)
                 const startMarker = 'Sa So Mo Di Mi Do Fr'; // Häufige Überschrift
@@ -25,12 +31,19 @@ async function parsePDF() {
                 const startIndex = text.indexOf(startMarker);
                 const endIndex = text.indexOf(endMarker);
 
+                // Nach dem Finden der Marker:
+                console.log("Startindex:", startIndex, "Endindex:", endIndex);
+
                 if (startIndex === -1 || endIndex === -1) {
                     console.error("Start- oder Endmarker nicht gefunden!");
                     return;
                 }
 
                 const dienstplanText = text.substring(startIndex, endIndex).trim();
+
+                // Nach dem Extrahieren des Dienstplanbereichs:
+                console.log("Dienstplanbereich:", dienstplanText);
+
                 const events = extractEventsFromTable(dienstplanText);
                 const icsContent = generateICS(events);
                 downloadICS(icsContent);
