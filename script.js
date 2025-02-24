@@ -6,26 +6,36 @@ async function parsePDF() {
         const reader = new FileReader();
         reader.onload = async function(e) {
             try {
-              const buffer = e.target.result;
-              const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
-              let text = "";
-              for (let i = 1; i <= pdf.numPages; i++) {
-                const page = await pdf.getPage(i);
-                const content = await page.getTextContent();
-                content.items.forEach(item => {
-                  text += item.str + " ";
-                });
-              }
-              // Dienstplan eingrenzen
-              const start = text.indexOf('01 02');
-              const end = text.indexOf('Erstellungsdatum:');
-              const dienstplan = text.substring(start, end);
+                const buffer = e.target.result;
+                const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+                let text = "";
+                for (let i = 1; i <= pdf.numPages; i++) {
+                    const page = await pdf.getPage(i);
+                    const content = await page.getTextContent();
+                    content.items.forEach(item => {
+                        text += item.str + " ";
+                    });
+                }
 
-              const events = extractEventsFromTable(dienstplan);
-              const icsContent = generateICS(events);
-              downloadICS(icsContent);
+                // Dienstplanbereich eingrenzen (robuster)
+                const startMarker = 'Sa So Mo Di Mi Do Fr'; // Häufige Überschrift
+                const endMarker = 'Erstellungsdatum:'; // Häufiger Footer
+                const startIndex = text.indexOf(startMarker);
+                const endIndex = text.indexOf(endMarker);
+
+                if (startIndex === -1 || endIndex === -1) {
+                    console.error("Start- oder Endmarker nicht gefunden!");
+                    return;
+                }
+
+                const dienstplanText = text.substring(startIndex, endIndex).trim();
+                const events = extractEventsFromTable(dienstplanText);
+                const icsContent = generateICS(events);
+                downloadICS(icsContent);
+
             } catch (error) {
-              console.error("Error parsing PDF:", error);
+                console.error("Fehler beim Parsen der PDF:", error);
+                alert("Fehler beim Parsen der PDF. Überprüfe die Konsole.");
             }
         };
         reader.readAsArrayBuffer(file);
@@ -34,81 +44,66 @@ async function parsePDF() {
 
 function extractEventsFromTable(tableText) {
     const dienste = [];
+    const zeilen = tableText.split('\n').map(row => row.trim()); // Leerzeichen entfernen
+    const diensteZeileIndex = zeilen.findIndex(row => row.includes("Schicht/Fehl"));
 
-    // 1. Aufteilen der Tabelle in Zeilen (angenommen, jede Zeile ist durch Zeilenumbruch getrennt)
-    const zeilen = tableText.split('\n');
-
-    // Finde die Zeile mit den Dienstkürzeln (angenommen, sie heißt "Schicht/Fehl" oder ähnlich)
-    let diensteZeile = -1;
-    for (let i = 0; i < zeilen.length; i++) {
-      if (zeilen[i].includes("Schicht/Fehl")) {
-        diensteZeile = i + 1; // Die Daten sind in der Zeile darunter
-        break;
-      }
-    }
-    if (diensteZeile === -1){
-      console.error("Dienstezeile nicht gefunden");
-      return dienste;
+    if (diensteZeileIndex === -1) {
+        console.error("Zeile mit 'Schicht/Fehl' nicht gefunden.");
+        return dienste;
     }
 
-    // 2. Extrahieren der Daten aus der Dienstezeile
-    const diensteDaten = zeilen[diensteZeile].split(" "); // Annahme: Daten sind durch Leerzeichen getrennt
-    const datumsZeile = zeilen[diensteZeile - 2].split(" "); // Zeile mit Datumsangaben
+    const datumsZeile = zeilen[diensteZeileIndex - 1].split(" "); // Datumszeile liegt darüber
+    const diensteZeile = zeilen[diensteZeileIndex + 1].split(" "); // Dienst ist darunter
 
-    // 3. Dienste den entsprechenden Datumsangaben zuordnen
-    for (let i = 0; i < diensteDaten.length; i++) {
-      const dienst = diensteDaten[i];
-      const datum = datumsZeile[i];
-      if (dienst && datum) {
-        dienste.push({ datum: datum, dienst: dienst });
-      }
+    // Zuordnung basierend auf Index (Vorsicht: Kann fehlschlagen, wenn Spalten nicht perfekt ausgerichtet sind)
+    for (let i = 0; i < Math.min(datumsZeile.length, diensteZeile.length); i++) {
+        const datum = datumsZeile[i].trim();
+        const dienst = diensteZeile[i].trim();
+
+        if (datum && dienst && !isNaN(parseInt(datum))) {
+          dienste.push({ datum: datum, dienst: dienst });
+        }
     }
 
-    // Filtere leere Einträge
-    const filtern = dienste.filter(function(e) {
-    return e.dienst !== 'Sollschicht' && e.dienst !== 'Schicht/Fehl' && e.datum !== "Throm," && e.datum !== "Jonathan" && e.dienst !== 'Sa' && e.dienst !== 'So' && e.dienst !== 'Mo' && e.dienst !== 'Di' && e.dienst !== 'Mi' && e.dienst !== 'Do' && e.dienst !== 'Fr' && e.dienst !== '' && e.datum !== 'Gruppe' && e.datum !== 'Rettungsdienst';
+    const gefilterteDienste = dienste.filter(event => {
+        return !['Sa', 'So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sollschicht', 'Schicht/Fehl'].includes(event.dienst) &&
+               !event.datum.includes('Gruppe') && !event.datum.includes('Throm') && !event.datum.includes('Rettungsdienst');
     });
-
-    console.log(filtern)
-    return filtern;
+    console.log(gefilterteDienste);
+    return gefilterteDienste;
 }
 
 function generateICS(events) {
     let icsContent = "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Your Company//Your App//EN\n";
 
     events.forEach(event => {
-        const [day, month, year] = "2025,02,";
-        const startDate = `${year}${month}${event.datum}`;
-        const endDate = `${year}${month}${event.datum}`;
+        // Korrekte Datumsformatierung
+        const year = '2025';
+        const month = '02';
+        const day = event.datum.padStart(2, '0'); // Führende Null, falls nötig
+        const startDate = `${year}${month}${day}`;
 
-        let startTime = "070000"; // Standard Tagdienst
+        let startTime = "070000";
         let endTime = "190000";
         let summary = event.dienst;
-        let ort = "";
+        let location = "";
+
         if (summary.includes("N")) {
-          startTime = "190000";
-          endTime = "070000";
+            startTime = "190000";
+            endTime = "070000";
         }
-         if (summary.includes("1")) {
-          ort = "Emmendingen"
-        }
-        if (summary.includes("2")) {
-          ort = "Gutach"
-        }
-        if (summary.includes("3")) {
-          ort = "Hebolzheim"
-        }
-        if (summary.includes("4")) {
-          ort = "Endingen"
-        }
-        if (summary.includes("5")) {
-          ort = "Elzach"
-        }
-        if (summary.includes("7")) {
-          ort = "Malterdingen"
-        }
-        icsContent += `BEGIN:VEVENT\nUID:${startDate}-${startTime}-${endTime}@yourdomain.com\nDTSTART;TZID=Europe/Berlin:${startDate}T${startTime}\nDTEND;TZID=Europe/Berlin:${startDate}T${endTime}\nSUMMARY:${summary}\nLOCATION:${ort}\nEND:VEVENT\n`;
-      });
+
+        if (summary.includes("1")) location = "Emmendingen";
+        if (summary.includes("2")) location = "Gutach";
+        if (summary.includes("3")) location = "Hebolzheim";
+        if (summary.includes("4")) location = "Endingen";
+        if (summary.includes("5")) location = "Elzach";
+        if (summary.includes("7")) location = "Malterdingen";
+
+        const uid = `${startDate}T${startTime}-${endTime}@yourdomain.com`.replace(/[^a-zA-Z0-9]/g, ''); // Saubere UID
+
+        icsContent += `BEGIN:VEVENT\nUID:${uid}\nDTSTART;TZID=Europe/Berlin:${startDate}T${startTime}\nDTEND;TZID=Europe/Berlin:${startDate}T${endTime}\nSUMMARY:${summary}\nLOCATION:${location}\nEND:VEVENT\n`;
+    });
 
     icsContent += "END:VCALENDAR";
     return icsContent;
