@@ -16,6 +16,8 @@ async function parsePDF() {
                         text += item.str + " ";
                     });
                 }
+                // Innerhalb der `parsePDF`-Funktion, direkt nach der Schleife, die den Text extrahiert:
+                console.log("Extrahierter Text:", text); // Zeigt den gesamten extrahierten Text an
 
                 // Dienstplanbereich eingrenzen (robuster)
                 const startMarker = 'Sa So Mo Di Mi Do Fr'; // Häufige Überschrift
