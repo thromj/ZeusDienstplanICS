@@ -1,3 +1,37 @@
+async function parsePDF() {
+    const fileInput = document.getElementById('pdfFileInput');
+    const file = fileInput.files[0];
+
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = async function(e) {
+            try {
+              const buffer = e.target.result;
+              const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+              let text = "";
+              for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                content.items.forEach(item => {
+                  text += item.str + " ";
+                });
+              }
+              // Dienstplan eingrenzen
+              const start = text.indexOf('01 02');
+              const end = text.indexOf('Erstellungsdatum:');
+              const dienstplan = text.substring(start, end);
+
+              const events = extractEventsFromTable(dienstplan);
+              const icsContent = generateICS(events);
+              downloadICS(icsContent);
+            } catch (error) {
+              console.error("Error parsing PDF:", error);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    }
+}
+
 function extractEventsFromTable(tableText) {
     const dienste = [];
 
@@ -80,36 +114,11 @@ function generateICS(events) {
     return icsContent;
 }
 
-async function parsePDF() {
-  const fileInput = document.getElementById('pdfFileInput');
-  const file = fileInput.files[0];
-
-  if (file) {
-      const reader = new FileReader();
-      reader.onload = async function(e) {
-          try {
-            const buffer = e.target.result;
-            const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
-            let text = "";
-            for (let i = 1; i <= pdf.numPages; i++) {
-              const page = await pdf.getPage(i);
-              const content = await page.getTextContent();
-              content.items.forEach(item => {
-                text += item.str + " ";
-              });
-            }
-            // Dienstplan eingrenzen
-            const start = text.indexOf('01 02');
-            const end = text.indexOf('Erstellungsdatum:');
-            const dienstplan = text.substring(start, end);
-
-            const events = extractEventsFromTable(dienstplan);
-            const icsContent = generateICS(events);
-            downloadICS(icsContent);
-          } catch (error) {
-            console.error("Error parsing PDF:", error);
-          }
-      };
-      reader.readAsArrayBuffer(file);
-  }
+function downloadICS(icsContent) {
+    const downloadLink = document.getElementById('downloadLink');
+    const blob = new Blob([icsContent], { type: 'text/calendar' });
+    const url = URL.createObjectURL(blob);
+    downloadLink.href = url;
+    downloadLink.download = 'dienstplan.ics';
+    downloadLink.style.display = 'block';
 }
